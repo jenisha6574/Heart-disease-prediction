@@ -1,0 +1,709 @@
+---
+title: "Heart disease prediction Project"
+author: "Jenisha Shrestha"
+date: "2025-03-10"
+output: pdf_document
+---
+
+```{r setup, include=FALSE,message=FALSE,warning=FALSE}
+library(knitr)
+library(tinytex)
+library(tidyverse)
+library(caret)
+library(MASS)
+library(ggplot2)
+library(dplyr)
+library(pROC)
+
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(out.width = "60%",fig.align='center')
+
+```
+
+```{r}
+heart_data <- read_csv("heart_disease.csv") %>% na.omit
+glimpse(heart_data)
+
+```
+```{r}
+heart_data$target_binary <- ifelse(heart_data$target <= 1 , 0, 1)
+heart_data$target_binary <- as.factor(heart_data$target_binary)
+table(heart_data$target_binary)
+```
+```{r}
+heart_data <- heart_data[, !(names(heart_data) == "target")]
+```
+
+
+
+
+
+
+# num variable of the targe variable is the response. 
+num: diagnosis of heart disease (angiographic disease status)
+        -- Value 0: < 50% diameter narrowing
+        -- Value 1: > 50% diameter narrowing
+        (in any major vessel: attributes 59 through 68 are vessels)
+
+```{r}
+ggplot(heart_data, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "black", color = "white") +
+  labs(title = "Age Distribution", x = "Age", y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+heart_data <- heart_data %>%
+  mutate(sex_ = ifelse(sex == "1", "male", "female"))
+
+```
+
+```{r}
+heart_data$sex_ <- as.factor(heart_data$sex_)
+
+ggplot(heart_data, aes(x = sex_)) + 
+  geom_bar(fill = "black") +
+  labs(title = "sex distribution", x = "sex", y = "count") +
+  theme_minimal()
+```
+```{r}
+ggplot(heart_data, aes(x = target_binary)) + 
+  geom_bar(fill = "black") +
+  labs(title = "response variable (viability to heart disease)", x = "target", y = "count") +
+  theme_minimal()
+```
+```{r}
+library(ggplot2)
+
+ggplot(heart_data, aes(x = factor(target_binary), y = thalach)) +
+  geom_boxplot(fill = "black") +
+  labs(title = "Max Heart Rate vs Heart Disease",
+       x = "Heart Disease (0 = No, 1 = Yes)",
+       y = "Max Heart Rate")
+```
+
+
+```{r}
+sum(is.na(heart_data))
+```
+```{r}
+max(heart_data$age)
+median(heart_data$age)
+min(heart_data$age)
+```
+```{r}
+max(heart_data$trestbps)
+median(heart_data$trestbps)
+min(heart_data$trestbps)
+```
+```{r}
+max(heart_data$chol)
+median(heart_data$chol)
+min(heart_data$chol)
+```
+
+```{r}
+max(heart_data$thalach)
+median(heart_data$thalach)
+min(heart_data$thalach) 
+```
+```{r}
+max(heart_data$oldpeak)
+median(heart_data$oldpeak)
+min(heart_data$oldpeak)
+```
+```{r}
+max(heart_data$ca)
+median(heart_data$ca)
+min(heart_data$ca)
+```
+```{r}
+max(heart_data$num)
+median(heart_data$num)
+min(heart_data$num)
+```
+
+
+
+
+
+```{r}
+
+# Select only numeric columns
+numeric_data <- heart_data[, sapply(heart_data, is.numeric)]
+
+# Compute correlation matrix
+cor_matrix <- cor(numeric_data, use = "complete.obs")  # Handles missing values
+cor_matrix
+
+```
+```{r}
+cor(heart_data$chol, as.numeric(heart_data$target_binary))
+```
+
+```{r}
+cor(heart_data$oldpeak,as.numeric(heart_data$target_binary))
+```
+```{r}
+cor(heart_data$trestbps, as.numeric(heart_data$target_binary))
+```
+
+
+
+
+
+
+# 
+
+```{r}
+library(randomForest)
+library(vip)
+
+```
+```{r}
+heart_data$target_binary <- as.factor(heart_data$target_binary)
+
+set.seed(123)  
+rf_model <- randomForest(target_binary ~ ., data = heart_data, importance = TRUE, ntree = 500)
+```
+
+```{r}
+varImpPlot(rf_model, main = "Random Forest Variable Importance")
+```
+```{r}
+vip(rf_model, 
+    num_features = 10,       
+    bar = TRUE,              
+    horizontal = TRUE,       
+    aesthetics = list(fill = 'white', color = "black")) +
+  ggtitle("Variable Importance (Random Forest)") +
+  theme_minimal()
+```
+```{r}
+ggsave("variable_importance_rf.png", width = 8, height = 6, dpi = 1200)
+```
+
+```{r}
+
+library(randomForest)
+library(caret)
+
+
+heart_data$target_binary <- as.factor(heart_data$target_binary)
+
+
+set.seed(123)
+
+
+folds <- createFolds(heart_data$target_binary, k = 10)
+
+
+cv_errors <- c()
+
+
+for (i in 1:10) {
+  
+
+  train_data <- heart_data[-folds[[i]], ]
+  test_data <- heart_data[folds[[i]], ]
+  
+
+  rf_model_cv <- randomForest(target_binary ~ ., data = train_data , ntree = 500)
+  
+ 
+  preds <- predict(rf_model_cv, newdata = test_data)
+  
+  
+  fold_error <- mean(preds != test_data$target_binary)
+  
+
+  cv_errors <- c(cv_errors, fold_error)
+}
+
+
+cv_error_rate <- mean(cv_errors)
+cv_error_rate
+
+
+```
+```{r}
+cv_df <- data.frame(
+  Fold = 1:10,
+  Error = cv_errors
+)
+```
+
+```{r}
+ggplot(cv_df, aes(x = Fold, y = Error)) +
+  geom_line(color = "black", size = 1.2) +
+  geom_point(color = "black", size = 3) +
+  geom_hline(yintercept = mean(cv_errors), color = "red", linetype = "dashed", size = 1) +
+  labs(title = "10-Fold Cross-Validation Classification Error Rate",
+       x = "Fold Number",
+       y = "Classification Error Rate") +
+  theme_minimal()
+```
+
+
+```{r}##
+set.seed(123)
+rf_binary_model <- randomForest(target_binary ~ ., data = heart_data , ntree = 500)
+
+rf_probs <- predict(rf_binary_model, type = "prob")[,2]  # probability of class "1" (disease present)
+
+# Create ROC object
+roc_obj <- roc(heart_data$target_binary, rf_probs)
+
+# Plot ROC curve
+plot(roc_obj, 
+     main = "ROC Curve for Random Forest Model", 
+     col = "blue", 
+     lwd = 2)
+abline(a=0, b=1, lty=2, col="gray")
+
+# Calculate AUC
+auc_value <- auc(roc_obj)
+auc_value
+
+```
+```{r}
+data_new <- heart_data[, !(names(heart_data) %in% "sex_")]
+```
+```{r}
+write.csv(data_new, "cleaned_binary_heart_data.csv", row.names = FALSE)
+```
+
+
+```{r}
+set.seed(303)
+rows <- sample(x=nrow(data_new),size=floor(0.80*nrow(data_new)),replace=FALSE)
+
+training <- data_new[rows,]
+testing <- data_new[-rows,]
+```
+
+
+
+```{r}
+log_model <- glm(target_binary~., data = training, family = 'binomial')
+summary(log_model)
+```
+```{r}
+testing$predicted_prob <- predict(log_model, newdata = testing, type = "response")
+
+testing$predicted_class <- ifelse(testing$predicted_prob > 0.5, 1, 0)
+table(Predicted = testing$predicted_class, Actual = testing$target_binary)
+```
+```{r}
+testing$predicted_class <- as.factor(testing$predicted_class)
+testing$target_binary <- as.factor(testing$target_binary)
+```
+
+```{r}
+ggplot(testing, aes(x = predicted_class, fill = target_binary)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Predicted vs Actual Class",
+       x = "Predicted Class", y = "Count",
+       fill = "Actual Class") +
+  theme_minimal()
+```
+```{r}
+ggsave('predicted_vs_actual_bar.jpg', width = 8, height = 6, dpi = 1200)
+```
+
+
+
+
+
+# log model missclassification rate 
+```{r}
+mean(testing$predicted_class != as.numeric(as.character(testing$target_binary)))
+```
+
+# best subset , backward or forward selection 
+
+mention fitted multiple data,just include best model. and show best metrics. 
+
+
+```{r}
+library(leaps)
+```
+```{r}
+
+data_new$target_binary <- as.factor(data_new$target_binary)
+
+
+best_subset_model <- regsubsets(target_binary ~ ., data = data_new , nvmax = 10)
+
+
+best_subset_summary <- summary(best_subset_model)
+plot(best_subset_summary$adjr2, type = "b",
+     xlab = "Number of Variables", ylab = "Adjusted R-squared",
+     main = "Best Subset Selection (Adjusted R-squared)")
+
+```
+
+```{r}
+which.max(best_subset_summary$adjr2)
+```
+```{r}
+coef(best_subset_model, id = which.max(best_subset_summary$adjr2))
+```
+
+```{r}
+#load ROCR package
+library(ROCR)
+
+#create required objects for ROC
+pred <- prediction(predictions=testing$predicted_class,
+                   labels=testing$target_binary)
+
+perf <- performance(pred,measure='fnr',x.measure='fpr')
+
+#plot ROC curve with threshold color
+plot(perf,colorize=TRUE)
+```
+
+
+```{r}
+perf2 <- performance(pred,measure='err')
+plot(perf2)
+```
+```{r}
+perf3 <- performance(pred,measure='tpr',x.measure='fpr')
+plot(perf3,colorize=TRUE)
+abline(a=0,b=1)
+```
+```{r}
+#compute AUC for the ROC curve
+perf4 <- performance(pred,measure='auc')
+perf4@y.values
+```
+
+```{r}
+# Assuming you already ran:
+# best_subset_model <- regsubsets(...)
+
+library(ggplot2)
+
+# Create a data frame
+adjr2_df <- data.frame(
+  NumVars = 1:length(best_subset_summary$adjr2),
+  AdjR2 = best_subset_summary$adjr2
+)
+
+# Plot
+ggplot(adjr2_df, aes(x = NumVars, y = AdjR2)) +
+  geom_bar(stat = "identity", fill = "white", color = "black") +
+  labs(title = "Adjusted R-squared by Number of Variables",
+       x = "Number of Variables",
+       y = "Adjusted R-squared") +
+  theme_minimal()
+
+```
+```{r}
+
+best_num_vars <- which.max(best_subset_summary$adjr2)
+
+
+best_variables <- names(coef(best_subset_model, id = best_num_vars))[-1]  # remove intercept
+
+
+var_df <- data.frame(
+  Variable = best_variables,
+  Selected = 1  
+)
+
+# Plot
+ggplot(var_df, aes(x = reorder(Variable, Selected), y = Selected)) +
+  geom_bar(stat = "identity", fill = "white", color = "black") +
+  labs(title = paste("Variables Selected (Best Model with", best_num_vars, "Variables)"),
+       x = "Variable",
+       y = "") +
+  theme_minimal() +
+  theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())
+
+```
+```{r}
+
+log_model_final <- glm(target_binary ~  ca + cp + exang + fbs + oldpeak + slope + thal , 
+                       data = training, 
+                       family = "binomial")
+
+
+```
+
+```{r}
+
+coefs <- coef(log_model_final)[-1]
+
+
+var_imp_df <- data.frame(
+  Variable = names(coefs),
+  Importance = abs(coefs)  
+)
+
+```
+```{r}
+library(ggplot2)
+
+ggplot(var_imp_df, aes(x = reorder(Variable, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "white", color = "black") +
+  labs(title = "Variable Importance Based on Logistic Regression Coefficients",
+       x = "Variables",
+       y = "Absolute Value of Coefficient") +
+  coord_flip() +
+  theme_minimal()
+
+```
+```{r}
+ggsave('variable_imoprtance.jpg', width = 8, height = 6, dpi = 1200 )
+```
+
+```{r}
+
+
+data_new$target_binary <- as.factor(data_new$target_binary)
+
+
+set.seed(123)
+folds <- createFolds(data_new$target_binary, k = 10)
+
+
+cv_errors <- c()
+
+
+for (i in 1:10) {
+ 
+  training <- data_new[-folds[[i]], ]
+  testing <- data_new[folds[[i]], ]
+  
+
+  model <- glm(target_binary ~ fbs + slope + exang + cp + ca + oldpeak + thal, 
+               data = training, family = "binomial")
+  
+
+  probs <- predict(model, newdata = testing, type = "response")
+  preds <- ifelse(probs > 0.5, 1, 0)
+  
+
+  actual <- as.numeric(as.character(testing$target_binary))
+  fold_error <- mean(preds != actual)
+  
+
+  cv_errors <- c(cv_errors, fold_error)
+}
+
+
+cv_df <- data.frame(Fold = 1:10, ErrorRate = cv_errors)
+
+
+ggplot(cv_df, aes(x = Fold, y = ErrorRate)) +
+  geom_line(color = "black", size = 1.2) +
+  geom_point(color = "red", size = 2.5) +
+  geom_hline(yintercept = mean(cv_errors), linetype = "dashed", color = "darkgreen") +
+  labs(title = "10-Fold Cross-Validation Classification Error Rate",
+       x = "Fold Number",
+       y = "Error Rate") +
+  theme_minimal()
+
+```
+```{r}
+ggsave(" cross_validation_error.jpg", width = 8, height = 6, dpi = 1200)
+```
+
+
+```{r}
+table(data_new$target_binary)
+```
+```{r}
+null_pred <- rep(0, nrow(data_new))  
+actual <- as.numeric(as.character(data_new$target_binary))
+```
+
+```{r}
+majority <- names(which.max(table(testing$target_binary)))
+
+
+null_preds <- rep(majority, nrow(testing))
+
+
+mean(null_preds == testing$target_binary)  
+1 - mean(null_preds == testing$target_binary) 
+```
+
+```{r}
+
+null_accuracy <- mean(null_pred == actual)
+null_error <- 1 - null_accuracy
+
+```
+```{r}
+data.frame(
+  Metric = c("Accuracy", "Classification Error"),
+  `Null Model` = c(null_accuracy, null_error)
+)
+```
+88% accuracy from fitted model. 
+
+
+
+```{r}
+
+1 - (logLik(log_model) / logLik(update(log_model, . ~ 1)))  
+
+
+log_model$deviance
+
+
+log_model$null.deviance
+
+
+anova(log_model, test = "Chisq")
+
+
+mean(cv_errors)  
+
+```
+
+```{r}
+# McFadden's pseudo R-squared
+pseudo_r2 <- 1 - (logLik(log_model) / logLik(update(log_model, . ~ 1)))
+pseudo_r2
+
+```
+```{r}
+resid_dev <- log_model$deviance
+null_dev  <- log_model$null.deviance
+
+resid_dev
+null_dev
+
+```
+```{r}
+anova(log_model, test = "Chisq")
+
+```
+
+```{r}
+cv_error <- mean(cv_errors)
+cv_error
+
+```
+```{r}
+data.frame(
+  Metric = c("Pseudo R-squared", "Residual Deviance", "Null Deviance", "Cross-Validated Error"),
+  `Fitted Model` = c(
+    round(as.numeric(pseudo_r2), 3),
+    round(resid_dev, 2),
+    round(null_dev, 2),
+    round(cv_error, 3)
+  )
+)
+```
+
+```{r}
+
+pseudo_r2 <- 1 - (logLik(log_model) / logLik(update(log_model, . ~ 1)))
+
+
+resid_dev <- log_model$deviance
+null_dev  <- log_model$null.deviance
+
+
+anova_test <- anova(log_model, test = "Chisq")
+anova_pval <- anova_test$`Pr(>Chi)`[length(anova_test$`Pr(>Chi)`)]  # get last p-value
+
+
+cv_error <- mean(cv_errors)
+
+```
+```{r}
+
+majority_class <- as.numeric(names(which.max(table(training$target_binary))))
+
+null_preds <- rep(majority_class, nrow(testing))
+actuals <- as.numeric(as.character(testing$target_binary))
+
+
+null_accuracy <- mean(null_preds == actuals)
+null_error <- 1 - null_accuracy
+
+```
+```{r}
+data.frame(
+  Metric = c("Pseudo R-squared", 
+             "Residual Deviance", 
+             "Null Deviance", 
+             "ANOVA p-value", 
+             "Cross-Validated Error"),
+  `Null Model` = c(
+    "0",                    
+    round(null_dev, 2),      
+    round(null_dev, 2),      
+    "-",                     
+    round(null_error, 3)     
+  ),
+  `Fitted Model` = c(
+    round(as.numeric(pseudo_r2), 3),
+    round(resid_dev, 2),
+    round(null_dev, 2),
+    format(anova_pval, digits = 3),
+    round(cv_error, 3)
+  )
+)
+
+```
+```{r}
+majority <- names(which.max(table(testing$target_binary)))
+
+
+null_preds <- rep(majority, nrow(testing))
+
+
+mean(null_preds == testing$target_binary)  
+1 - mean(null_preds == testing$target_binary) 
+
+```
+
+```{r}
+set.seed(303)
+rows <- sample(x=nrow(data_new),size=floor(0.80*nrow(data_new)),replace=FALSE)
+
+training1 <- data_new[rows,]
+testing1 <- data_new[-rows,]
+```
+
+```{r}
+log_model_final1 <- glm(target_binary ~  ca + cp + exang + fbs + oldpeak + slope + thal , 
+                       data = training1, 
+                       family = "binomial")
+```
+```{r}
+testing1$predicted_prob <- predict(log_model_final1, newdata = testing1, type = "response")
+
+testing1$predicted_class <- ifelse(testing1$predicted_prob > 0.5, 1, 0)
+table(Predicted = testing1$predicted_class, Actual = testing1$target_binary)
+```
+```{r}
+mean(testing1$predicted_class != as.numeric(as.character(testing1$target_binary)))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
